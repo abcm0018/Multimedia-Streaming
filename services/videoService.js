@@ -25,7 +25,7 @@ function calculateDurationSeconds(createdAt) {
 }
 
 async function insertVideoRecord(db, streamKey, folderPath, hlsPath, dashPath) {
-  const title = `Emisión ${streamKey}`;
+  const title = `Emisión ${streamKey} - ${new Date().toLocaleString("es-ES")}`;
 
   await db.execute(
     `INSERT INTO videos (

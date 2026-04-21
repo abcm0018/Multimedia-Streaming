@@ -8,13 +8,13 @@ const {
   markVideoAsProcessing,
   finalizeVideoRecord,
   markVideoAsError,
-} = require("./services/video.service");
+} = require("./services/videoService");
 const {
   buildPublicURLFromAbsoluteFilePath,
   delay,
   fileExists,
   findMp4PublicUrl,
-} = require("./services/media.utils");
+} = require("./services/mediaUtils");
 
 const config = {
   rtmp: {

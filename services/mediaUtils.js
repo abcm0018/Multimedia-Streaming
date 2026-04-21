@@ -32,22 +32,38 @@ async function findMp4PublicUrl(folderPath, mediaroot, httpPort) {
   try {
     const files = await fs.readdir(folderPath);
 
-    const mp4File = files.find(
+    const mp4Files = files.filter(
       (file) => path.extname(file).toLowerCase() === ".mp4",
     );
 
-    if (!mp4File) {
+    if (!mp4Files.length) {
       console.warn(
         "No se encontró ningún archivo MP4 en la carpeta del stream",
       );
       return null;
     }
 
-    const mp4AbsolutePath = path.join(folderPath, mp4File);
+    const mp4FilesWithStats = await Promise.all(
+      mp4Files.map(async (file) => {
+        const fullPath = path.join(folderPath, file);
+        const stats = await fs.stat(fullPath);
+
+        return {
+          file,
+          fullPath,
+          mtimeMs: stats.mtimeMs,
+        };
+      }),
+    );
+
+    mp4FilesWithStats.sort((a, b) => b.mtimeMs - a.mtimeMs);
+
+    const newestMp4Path = mp4FilesWithStats[0].fullPath;
+
     return buildPublicURLFromAbsoluteFilePath(
       mediaroot,
       httpPort,
-      mp4AbsolutePath,
+      newestMp4Path,
     );
   } catch (error) {
     console.error("Error al buscar el archivo MP4:", error);

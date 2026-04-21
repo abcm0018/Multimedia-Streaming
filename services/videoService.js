@@ -91,9 +91,53 @@ async function markVideoAsError(db, streamKey) {
   );
 }
 
+async function createPendingVideo(db, title, streamKey) {
+  await db.execute(
+    `INSERT INTO videos (
+      title,
+      stream_key,
+      folder_path,
+      hls_path,
+      dash_path,
+      mp4_path,
+      status,
+      created_at
+    ) VALUES (?, ?, NULL, NULL, NULL, NULL, 'PENDING', NOW())`,
+    [title, streamKey],
+  );
+}
+
+async function findPendingVideoByStreamKey(db, streamKey) {
+  const [rows] = await db.execute(
+    `SELECT id, title, stream_key
+     FROM videos
+     WHERE stream_key = ? AND status = 'PENDING'
+     ORDER BY created_at DESC
+     LIMIT 1`,
+    [streamKey],
+  );
+
+  return rows.length ? rows[0] : null;
+}
+
+async function activatePendingVideo(db, id, folderPath, hlsPath, dashPath) {
+  await db.execute(
+    `UPDATE videos
+     SET status = 'LIVE',
+         folder_path = ?,
+         hls_path = ?,
+         dash_path = ?
+     WHERE id = ?`,
+    [folderPath, hlsPath, dashPath, id],
+  );
+}
+
 module.exports = {
   insertVideoRecord,
   markVideoAsProcessing,
   finalizeVideoRecord,
   markVideoAsError,
+  createPendingVideo,
+  findPendingVideoByStreamKey,
+  activatePendingVideo,
 };

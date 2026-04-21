@@ -16,6 +16,7 @@ class NodeTransSession extends EventEmitter {
   constructor(conf) {
     super();
     this.conf = conf;
+    this.mp4_exec = null;
   }
 
   /**
@@ -234,14 +235,12 @@ class NodeTransSession extends EventEmitter {
       "-i",
       inPath,
 
-      // Método de split de vídeo en tres variantes
       "-filter_complex",
       "[0:v]split=3[v1][v2][v3];" +
         "[v1]scale=w=426:h=240:force_original_aspect_ratio=decrease:force_divisible_by=2[v240];" +
         "[v2]scale=w=854:h=480:force_original_aspect_ratio=decrease:force_divisible_by=2[v480];" +
         "[v3]scale=w=1280:h=720:force_original_aspect_ratio=decrease:force_divisible_by=2[v720]",
 
-      // Método de mapeo de vídeo+audio por variante
       "-map",
       "[v240]",
       "-map",
@@ -273,7 +272,6 @@ class NodeTransSession extends EventEmitter {
       "-ar",
       "48000",
 
-      // Método de bitrate variante 240p
       "-b:v:0",
       "400k",
       "-maxrate:v:0",
@@ -283,7 +281,6 @@ class NodeTransSession extends EventEmitter {
       "-b:a:0",
       "64k",
 
-      // Método de bitrate variante 480p
       "-b:v:1",
       "1200k",
       "-maxrate:v:1",
@@ -293,7 +290,6 @@ class NodeTransSession extends EventEmitter {
       "-b:a:1",
       "96k",
 
-      // Método de bitrate variante 720p
       "-b:v:2",
       "2800k",
       "-maxrate:v:2",
@@ -303,7 +299,6 @@ class NodeTransSession extends EventEmitter {
       "-b:a:2",
       "128k",
 
-      // Método HLS adaptativo con master playlist
       "-f",
       "hls",
       "-hls_time",
@@ -321,9 +316,7 @@ class NodeTransSession extends EventEmitter {
       `${hlsRoot}/%v/index.m3u8`,
     ];
 
-    argv = argv.filter((n) => {
-      return n;
-    });
+    argv = argv.filter((n) => n);
 
     this.ffmpeg_exec = spawn(this.conf.ffmpeg, argv);
 
@@ -339,11 +332,69 @@ class NodeTransSession extends EventEmitter {
       Logger.ffdebug(`FF输出：${data}`);
     });
 
-    this.ffmpeg_exec.on("close", (code) => {
+    //Volvemos a generar MP4 también en el flujo ABR
+    if (this.conf.mp4) {
+      this.conf.mp4Flags = this.conf.mp4Flags ? this.conf.mp4Flags : "";
+      let mp4FileName = dateFormat("yyyy-mm-dd-HH-MM") + ".mp4";
+      let mp4OutputPath = `${ouPath}/${mp4FileName}`;
+
+      Logger.log(
+        "[Transmuxing MP4] " + this.conf.streamPath + " to " + mp4OutputPath,
+      );
+
+      let mp4Argv = [
+        "-y",
+        "-fflags",
+        "nobuffer",
+        "-i",
+        inPath,
+        "-c:v",
+        this.conf.vc || "copy",
+        "-c:a",
+        this.conf.ac || "copy",
+      ];
+
+      Array.prototype.push.apply(mp4Argv, this.conf.vcParam || []);
+      Array.prototype.push.apply(mp4Argv, this.conf.acParam || []);
+
+      // CAMBIO: mp4Flags en ffmpeg deben ir separados, no como output tee
+      if (this.conf.mp4Flags && this.conf.mp4Flags.includes("movflags")) {
+        mp4Argv.push("-movflags", "faststart");
+      }
+
+      Array.prototype.push.apply(mp4Argv, [
+        "-map",
+        "0:a?",
+        "-map",
+        "0:v?",
+        mp4OutputPath,
+      ]);
+
+      mp4Argv = mp4Argv.filter((n) => n);
+
+      this.mp4_exec = spawn(this.conf.ffmpeg, mp4Argv);
+
+      this.mp4_exec.on("error", (e) => {
+        Logger.ffdebug(e);
+      });
+
+      this.mp4_exec.stdout.on("data", (data) => {
+        Logger.ffdebug(`FF输出：${data}`);
+      });
+
+      this.mp4_exec.stderr.on("data", (data) => {
+        Logger.ffdebug(`FF输出：${data}`);
+      });
+
+      this.mp4_exec.on("close", () => {
+        Logger.log("[Transmuxing MP4 end] " + this.conf.streamPath);
+      });
+    }
+
+    this.ffmpeg_exec.on("close", () => {
       Logger.log("[Transmuxing ABR HLS end] " + this.conf.streamPath);
       this.emit("end");
 
-      // Método por si no queremos guardar chunks para VoD, los borramos
       if (!this.conf.keepSegments) {
         this.deleteHlsArtifacts(hlsRoot);
       }
@@ -383,7 +434,10 @@ class NodeTransSession extends EventEmitter {
   }
 
   end() {
-    // this.ffmpeg_exec.kill();
+    // Cerramos ambos procesos
+    if (this.ffmpeg_exec) {
+      this.ffmpeg_exec.kill("SIGTERM");
+    }
   }
 }
 

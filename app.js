@@ -8,6 +8,8 @@ const {
   markVideoAsProcessing,
   finalizeVideoRecord,
   markVideoAsError,
+  findPendingVideoByStreamKey,
+  activatePendingVideo,
 } = require("./services/videoService");
 const {
   buildPublicURLFromAbsoluteFilePath,
@@ -126,11 +128,25 @@ nms.on("postPublish", async (id, streamPath, args) => {
       dashAbsolutePath,
     );
 
-    await insertVideoRecord(db, streamKey, folderPath, hlsPath, dashPath);
+    const pendingVideo = await findPendingVideoByStreamKey(db, streamKey);
 
-    console.log(`[DB] Emisión ${streamKey} insertada correctamente`);
+    if (pendingVideo) {
+      await activatePendingVideo(
+        db,
+        pendingVideo.id,
+        folderPath,
+        hlsPath,
+        dashPath,
+      );
+      console.log(`[DB] Emisión pendiente ${streamKey} activada correctamente`);
+    } else {
+      await insertVideoRecord(db, streamKey, folderPath, hlsPath, dashPath);
+      console.log(
+        `[DB] No había pendiente. Emisión ${streamKey} insertada automáticamente`,
+      );
+    }
   } catch (error) {
-    console.error("[DB] Error al insertar la emisión:", error);
+    console.error("[DB] Error al insertar/activar la emisión:", error);
   }
 });
 
@@ -153,7 +169,7 @@ nms.on("donePublish", async (id, streamPath, args) => {
 
     const folderPath = path.join(config.http.mediaroot, appName, streamKey);
 
-    await delay(1500);
+    await delay(2000);
 
     const hlsManifestPath = path.join(folderPath, "hls", "master.m3u8");
     const hlsExists = await fileExists(hlsManifestPath);

@@ -23,6 +23,7 @@ const streamsRoute = require("./api/routes/streams");
 const serverRoute = require("./api/routes/server");
 const relayRoute = require("./api/routes/relay");
 const videosRoute = require("./api/routes/videos");
+const videosController = require("./api/controllers/videos");
 
 class NodeHttpServer {
   constructor(config) {
@@ -59,12 +60,19 @@ class NodeHttpServer {
     }
 
     if (this.config.http.api !== false) {
+      // Rutas públicas de lectura
+      app.use("/public-api/streams", streamsRoute(context));
+      app.get("/public-api/videos/ready", videosController.getReadyVideos);
+
+      // Protección de administración
       if (this.config.auth && this.config.auth.api) {
         app.use(
           ["/api/*", "/static/*", "/admin/*"],
           basicAuth(this.config.auth.api_user, this.config.auth.api_pass),
         );
       }
+
+      // Rutas privadas/admin
       app.use("/api/streams", streamsRoute(context));
       app.use("/api/server", serverRoute(context));
       app.use("/api/relay", relayRoute(context));
@@ -79,11 +87,6 @@ class NodeHttpServer {
 
     this.httpServer = Http.createServer(app);
 
-    /**
-     * ~ openssl genrsa -out privatekey.pem 1024
-     * ~ openssl req -new -key privatekey.pem -out certrequest.csr
-     * ~ openssl x509 -req -in certrequest.csr -signkey privatekey.pem -out certificate.pem
-     */
     if (this.config.https) {
       let options = {
         key: Fs.readFileSync(this.config.https.key),

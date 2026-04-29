@@ -12,7 +12,11 @@ function buildPublicURLFromAbsoluteFilePath(mediaroot, httpPort, absPath) {
   const relativePath = path.relative(normalizedMediaRoot, normalizedAbsPath);
   const publicPath = relativePath.split(path.sep).join("/");
 
-  return `http://localhost:${httpPort}/${publicPath}`;
+  // CAMBIO: permite usar ngrok, IP local o localhost según entorno
+  const publicBaseUrl =
+    process.env.PUBLIC_BASE_URL || `http://localhost:${httpPort}`;
+
+  return `${publicBaseUrl}/${publicPath}`;
 }
 
 function delay(ms) {

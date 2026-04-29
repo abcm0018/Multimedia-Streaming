@@ -11,7 +11,6 @@ const Https = require("https");
 const WebSocket = require("ws");
 const Express = require("express");
 const bodyParser = require("body-parser");
-const basicAuth = require("basic-auth-connect");
 const NodeFlvSession = require("./node_flv_session");
 const HTTP_PORT = 80;
 const HTTPS_PORT = 443;
@@ -24,6 +23,23 @@ const serverRoute = require("./api/routes/server");
 const relayRoute = require("./api/routes/relay");
 const videosRoute = require("./api/routes/videos");
 const videosController = require("./api/controllers/videos");
+
+function apiBasicAuthNoPopup(username, password) {
+  return function (req, res, next) {
+    const authHeader = req.headers.authorization || "";
+    const expectedHeader =
+      "Basic " + Buffer.from(username + ":" + password).toString("base64");
+
+    if (authHeader === expectedHeader) {
+      return next();
+    }
+
+    return res.status(401).json({
+      error: "Unauthorized",
+      message: "Credenciales de administrador no válidas",
+    });
+  };
+}
 
 class NodeHttpServer {
   constructor(config) {
@@ -52,13 +68,6 @@ class NodeHttpServer {
       this.onConnect(req, res);
     });
 
-    let adminEntry = path.join(__dirname + "/public/admin/index.html");
-    if (Fs.existsSync(adminEntry)) {
-      app.get("/admin/*", (req, res) => {
-        res.sendFile(adminEntry);
-      });
-    }
-
     if (this.config.http.api !== false) {
       // Rutas públicas de lectura
       app.use("/public-api/streams", streamsRoute(context));
@@ -67,8 +76,11 @@ class NodeHttpServer {
       // Protección de administración
       if (this.config.auth && this.config.auth.api) {
         app.use(
-          ["/api/*", "/static/*", "/admin/*"],
-          basicAuth(this.config.auth.api_user, this.config.auth.api_pass),
+          "/api",
+          apiBasicAuthNoPopup(
+            this.config.auth.api_user,
+            this.config.auth.api_pass,
+          ),
         );
       }
 
@@ -81,6 +93,19 @@ class NodeHttpServer {
 
     app.use(Express.static(path.join(__dirname + "/public")));
     app.use(Express.static(this.mediaroot));
+
+    // Permite abrir directamente /live, /vod, /dashboard, /streams y /profile.
+    const publicEntry = path.join(__dirname, "public", "index.html");
+
+    if (Fs.existsSync(publicEntry)) {
+      app.get(
+        ["/", "/live", "/vod", "/dashboard", "/streams", "/profile"],
+        function (req, res) {
+          res.sendFile(publicEntry);
+        },
+      );
+    }
+
     if (config.http.webroot) {
       app.use(Express.static(config.http.webroot));
     }

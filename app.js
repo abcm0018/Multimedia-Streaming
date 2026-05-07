@@ -10,12 +10,17 @@ const {
   markVideoAsError,
   findPendingVideoByStreamKey,
   activatePendingVideo,
+  findLatestVideoByStreamKey,
+  markVideoAsProcessingById,
+  finalizeVideoRecordById,
+  markVideoAsErrorById,
 } = require("./services/videoService");
 const {
   buildPublicURLFromAbsoluteFilePath,
   delay,
   fileExists,
   findMp4PublicUrl,
+  copyDirectory,
 } = require("./services/mediaUtils");
 
 const config = {
@@ -28,8 +33,7 @@ const config = {
   },
   http: {
     port: 8000,
-    mediaroot:
-      "C:/Users/anabe/Desktop/Master/Segundo Cuatrimestre/Advanced Multimedia Services/Practica 2/node-media-server/media",
+    mediaroot: "C:/Users/Ana Belen/OneDrive/Escritorio/Multimedia-Streaming/media",
     webroot: "./www",
     allow_origin: "*",
     api: true,
@@ -48,7 +52,7 @@ const config = {
     secret: "nodemedia2017privatekey",
   },
   trans: {
-    ffmpeg: "C:/ffmpeg/ffmpeg.exe",
+    ffmpeg: "C:/ffmpeg/bin/ffmpeg.exe",
     tasks: [
       {
         app: "live",
@@ -151,6 +155,7 @@ nms.on("postPublish", async (id, streamPath, args) => {
 });
 
 nms.on("donePublish", async (id, streamPath, args) => {
+  let video = null;
   try {
     console.log(
       "[NodeEvent on donePublish]",
@@ -165,22 +170,42 @@ nms.on("donePublish", async (id, streamPath, args) => {
       return;
     }
 
-    await markVideoAsProcessing(db, streamKey);
+    video = await findLatestVideoByStreamKey(db, streamKey);
+
+    if (!video) {
+      console.error(`[DB] No se encontró vídeo para streamKey=${streamKey}`);
+      return;
+    }
+
+    await markVideoAsProcessingById(db, video.id);
 
     const folderPath = path.join(config.http.mediaroot, appName, streamKey);
 
     await delay(2000);
 
-    const hlsManifestPath = path.join(folderPath, "hls", "master.m3u8");
+    const hlsSourceFolder = path.join(folderPath, "hls");
+    const hlsManifestPath = path.join(hlsSourceFolder, "master.m3u8");
     const hlsExists = await fileExists(hlsManifestPath);
 
     if (!hlsExists) {
       console.error(
         `[STREAM] No se generaron correctamente los manifiestos ABR para ${streamKey}`,
       );
-      await markVideoAsError(db, streamKey);
+      await markVideoAsErrorById(db, video.id);
       return;
     }
+
+    const vodHlsFolder = path.join(folderPath, "vod", String(video.id), "hls");
+
+    await copyDirectory(hlsSourceFolder, vodHlsFolder);
+
+    const vodHlsManifestPath = path.join(vodHlsFolder, "master.m3u8");
+
+    const vodHlsPath = buildPublicURLFromAbsoluteFilePath(
+      config.http.mediaroot,
+      config.http.port,
+      vodHlsManifestPath,
+    );
 
     const mp4Path = await findMp4PublicUrl(
       folderPath,
@@ -188,23 +213,31 @@ nms.on("donePublish", async (id, streamPath, args) => {
       config.http.port,
     );
 
-    await finalizeVideoRecord(db, streamKey, mp4Path);
+    await finalizeVideoRecordById(db, video.id, mp4Path, vodHlsPath);
 
     console.log(`[DB] Emisión ${streamKey} actualizada a READY`);
+    console.log(`[DB] ID vídeo: ${video.id}`);
+    console.log(`[DB] HLS histórico: ${vodHlsPath}`);
     console.log(`[DB] MP4 detectado: ${mp4Path || "No encontrado"}`);
   } catch (error) {
     console.error("[DB] Error al finalizar la emisión:", error);
 
     try {
-      const streamKey = getStreamKey(streamPath);
-      if (streamKey) {
-        await markVideoAsError(db, streamKey);
+      if (video && video.id) {
+        await markVideoAsErrorById(db, video.id);
+      } else {
+        const streamKey = getStreamKey(streamPath);
+
+        if (streamKey) {
+          await markVideoAsError(db, streamKey);
+        }
       }
     } catch (innerError) {
       console.error("[DB] Error al marcar la emisión como ERROR:", innerError);
     }
   }
 });
+
 
 nms.on("doneConnect", (id, args) => {
   console.log(
@@ -215,6 +248,7 @@ nms.on("doneConnect", (id, args) => {
 
 async function startServer() {
   try {
+    await fs.mkdir(config.http.mediaroot, { recursive: true });
     await initializeDatabase();
     nms.run();
     console.log("[SERVER] Node Media Server iniciado correctamente");

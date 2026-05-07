@@ -19,6 +19,23 @@ function buildPublicURLFromAbsoluteFilePath(mediaroot, httpPort, absPath) {
   return `${publicBaseUrl}/${publicPath}`;
 }
 
+async function copyDirectory(sourceDir, targetDir) {
+  await fs.mkdir(targetDir, { recursive: true });
+
+  const entries = await fs.readdir(sourceDir, { withFileTypes: true });
+
+  for (const entry of entries) {
+    const sourcePath = path.join(sourceDir, entry.name);
+    const targetPath = path.join(targetDir, entry.name);
+
+    if (entry.isDirectory()) {
+      await copyDirectory(sourcePath, targetPath);
+    } else {
+      await fs.copyFile(sourcePath, targetPath);
+    }
+  }
+}
+
 function delay(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
@@ -80,4 +97,5 @@ module.exports = {
   delay,
   fileExists,
   findMp4PublicUrl,
+  copyDirectory,
 };

@@ -15,6 +15,22 @@ async function getVideoCreatedAt(db, streamKey) {
   return rows[0].created_at;
 }
 
+async function getVideoCreatedAtById(db, id) {
+  const [rows] = await db.execute(
+    `SELECT id, created_at
+     FROM videos
+     WHERE id = ?
+     LIMIT 1`,
+    [id],
+  );
+
+  if (!rows.length) {
+    return null;
+  }
+
+  return rows[0].created_at;
+}
+
 function calculateDurationSeconds(createdAt) {
   if (!createdAt) return 0;
 
@@ -132,6 +148,81 @@ async function activatePendingVideo(db, id, folderPath, hlsPath, dashPath) {
   );
 }
 
+/**
+ * Devuelve el último vídeo asociado a una stream_key.
+ * Lo usaremos al finalizar la emisión para obtener el id concreto
+ * y guardar el HLS histórico en /vod/{id}/hls/master.m3u8.
+ */
+async function findLatestVideoByStreamKey(db, streamKey) {
+  const [rows] = await db.execute(
+    `SELECT id, title, stream_key, created_at
+     FROM videos
+     WHERE stream_key = ?
+     ORDER BY id DESC
+     LIMIT 1`,
+    [streamKey],
+  );
+
+  return rows.length ? rows[0] : null;
+}
+
+/**
+ * CAMBIO:
+ * Marca como PROCESSING una emisión concreta por id.
+ */
+async function markVideoAsProcessingById(db, id) {
+  const createdAt = await getVideoCreatedAtById(db, id);
+  const durationSeconds = calculateDurationSeconds(createdAt);
+
+  await db.execute(
+    `UPDATE videos
+     SET status = 'PROCESSING',
+         ended_at = NOW(),
+         duration_seconds = ?
+     WHERE id = ?`,
+    [durationSeconds, id],
+  );
+}
+
+/**
+ * CAMBIO:
+ * Finaliza una emisión concreta por id.
+ * Actualiza tanto el MP4 como el HLS histórico.
+ */
+async function finalizeVideoRecordById(db, id, mp4Path, hlsPath) {
+  const createdAt = await getVideoCreatedAtById(db, id);
+  const durationSeconds = calculateDurationSeconds(createdAt);
+
+  await db.execute(
+    `UPDATE videos
+     SET status = 'READY',
+         ended_at = NOW(),
+         hls_path = ?,
+         mp4_path = ?,
+         duration_seconds = ?
+     WHERE id = ?`,
+    [hlsPath, mp4Path, durationSeconds, id],
+  );
+}
+
+/**
+ * CAMBIO:
+ * Marca como ERROR una emisión concreta por id.
+ */
+async function markVideoAsErrorById(db, id) {
+  const createdAt = await getVideoCreatedAtById(db, id);
+  const durationSeconds = calculateDurationSeconds(createdAt);
+
+  await db.execute(
+    `UPDATE videos
+     SET status = 'ERROR',
+         ended_at = NOW(),
+         duration_seconds = ?
+     WHERE id = ?`,
+    [durationSeconds, id],
+  );
+}
+
 module.exports = {
   insertVideoRecord,
   markVideoAsProcessing,
@@ -140,4 +231,9 @@ module.exports = {
   createPendingVideo,
   findPendingVideoByStreamKey,
   activatePendingVideo,
+
+  findLatestVideoByStreamKey,
+  markVideoAsProcessingById,
+  finalizeVideoRecordById,
+  markVideoAsErrorById,
 };
